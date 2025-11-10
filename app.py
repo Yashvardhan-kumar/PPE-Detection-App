@@ -1,53 +1,60 @@
 import streamlit as st
-import os
+import os, time
+from pathlib import Path
 from PIL import Image
 import torch
-import time
-
-# Load your trained YOLOv5 model
-@st.cache_resource
-def load_model():
-    model = torch.hub.load('ultralytics/yolov5', 'custom',
-                           path='runs/train/PPE-Detection7/weights/best.pt',
-                           force_reload=False)
-    return model
 
 st.set_page_config(page_title="🦺 PPE Detection App", layout="centered")
 st.title("🦺 PPE Detection App")
 st.write("Upload an image to detect helmets, vests, masks, and more!")
 
+# --------- Model loader (Cloud-safe) ----------
+@st.cache_resource
+def load_model():
+    root = Path(__file__).resolve().parent
+    candidates = [
+        root / "weights" / "best.pt",   # your LFS-trained weights
+        root / "best.pt",               # optional fallback
+        root / "yolov5s.pt",            # tiny demo fallback
+    ]
+    weight = next((str(p) for p in candidates if p.exists()), None)
+    if not weight:
+        st.error("No weights found. Add your trained file at `weights/best.pt` "
+                 "or keep `yolov5s.pt` in the repo root.")
+        st.stop()
+    return torch.hub.load('ultralytics/yolov5', 'custom', path=weight, force_reload=False)
+
 model = load_model()
 
-# File uploader
+# --------- App -----------
 uploaded_file = st.file_uploader("Choose an image...", type=["jpg", "jpeg", "png"])
 
 if uploaded_file is not None:
-    # Save uploaded image temporarily
-    img = Image.open(uploaded_file)
-    img_path = f"temp_{int(time.time())}_{uploaded_file.name}"
+    # Save uploaded image to /tmp (works locally and on Streamlit Cloud)
+    img = Image.open(uploaded_file).convert("RGB")
+    img_path = Path("/tmp") / f"temp_{int(time.time())}_{uploaded_file.name}"
     img.save(img_path)
 
     st.image(img, caption="📸 Uploaded Image", use_container_width=True)
     st.write("🔍 Detecting...")
 
-    # Create a unique folder for each detection
-    results_dir = os.path.join('results', f"detection_{int(time.time())}")
-    os.makedirs(results_dir, exist_ok=True)
+    # Create a unique folder under /tmp for each detection
+    results_dir = Path("/tmp") / f"detection_{int(time.time())}"
+    results_dir.mkdir(parents=True, exist_ok=True)
 
-    # Run detection and save in the new folder
-    results = model(img_path)
-    results.save(save_dir=results_dir)
+    # Run detection and save annotated image(s)
+    results = model(str(img_path))
+    results.save(save_dir=str(results_dir))
 
     # Find the latest detection image
     detected_files = sorted(
-        [os.path.join(results_dir, f) for f in os.listdir(results_dir)],
-        key=os.path.getmtime,
+        [results_dir / f for f in os.listdir(results_dir)],
+        key=lambda p: p.stat().st_mtime,
         reverse=True
     )
     detected_img_path = detected_files[0] if detected_files else None
-
     if detected_img_path:
-        st.image(detected_img_path, caption="🧠 Detection Results", use_container_width=True)
+        st.image(str(detected_img_path), caption="🧠 Detection Results", use_container_width=True)
 
     # Extract detection info
     detected_objects = results.pandas().xyxy[0]
@@ -57,33 +64,17 @@ if uploaded_file is not None:
     else:
         st.subheader("📋 Detection Details")
 
-        # Define color mapping
         color_map = {
-            "Hardhat": "green",
-            "Mask": "green",
-            "Safety Vest": "green",
-            "NO-Hardhat": "red",
-            "NO-Mask": "red",
-            "NO-Safety Vest": "red",
-            "Person": "yellow",
-            "Safety Cone": "yellow",
-            "Machinery": "yellow",
-            "Vehicle": "yellow"
+            "Hardhat": "green", "Mask": "green", "Safety Vest": "green",
+            "NO-Hardhat": "red", "NO-Mask": "red", "NO-Safety Vest": "red",
+            "Person": "yellow", "Safety Cone": "yellow", "Machinery": "yellow", "Vehicle": "yellow"
         }
 
-        # Group detections by color
-        sections = {
-            "🟢 Safe Equipment": [],
-            "🟡 Other Objects": [],
-            "🔴 Unsafe Conditions": []
-        }
-
+        sections = {"🟢 Safe Equipment": [], "🟡 Other Objects": [], "🔴 Unsafe Conditions": []}
         for _, row in detected_objects.iterrows():
-            label = row['name']
-            conf = row['confidence']
+            label = row["name"]; conf = row["confidence"]
             color = color_map.get(label, "white")
             text = f"<span style='color:{color}; font-size:18px;'><b>{label}</b> — Confidence: {conf:.2f}</span>"
-
             if label.startswith("NO-"):
                 sections["🔴 Unsafe Conditions"].append(text)
             elif label in ["Hardhat", "Mask", "Safety Vest"]:
@@ -91,25 +82,22 @@ if uploaded_file is not None:
             else:
                 sections["🟡 Other Objects"].append(text)
 
-        # Display each section
         for title, items in sections.items():
             if items:
                 st.markdown(f"### {title}")
                 for t in items:
                     st.markdown(t, unsafe_allow_html=True)
 
-        # Summary section
         st.write("---")
         st.subheader("🧾 Detection Summary")
-
-        counts = detected_objects['name'].value_counts()
+        counts = detected_objects["name"].value_counts()
         for obj, count in counts.items():
             color = color_map.get(obj, "white")
-            st.markdown(
-                f"<span style='color:{color}; font-size:16px;'>• {obj}: {count}</span>",
-                unsafe_allow_html=True
-            )
+            st.markdown(f"<span style='color:{color}; font-size:16px;'>• {obj}: {count}</span>",
+                        unsafe_allow_html=True)
 
     # Cleanup temporary file
-    if os.path.exists(img_path):
-        os.remove(img_path)
+    try:
+        img_path.unlink(missing_ok=True)  # Python 3.8+: use os.remove if older
+    except Exception:
+        pass
