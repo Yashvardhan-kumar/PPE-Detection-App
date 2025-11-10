@@ -1,0 +1,9 @@
+train: C:/Users/yashv/PycharmProjects/PythonProject1/Dataset/Train/images
+val: C:/Users/yashv/PycharmProjects/PythonProject1/Dataset/Validation/images
+test: C:/Users/yashv/PycharmProjects/PythonProject1/Dataset/Test/images
+
+nc: 10
+names: [
+  'Hardhat', 'Mask', 'NO-Hardhat', 'NO-Mask', 'NO-Safety Vest',
+  'Person', 'Safety Cone', 'Safety Vest', 'Machinery', 'Vehicle'
+]
