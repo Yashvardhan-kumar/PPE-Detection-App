@@ -1,14 +1,9 @@
 streamlit>=1.36
-# CPU-only PyTorch + TorchVision matching versions
 torch==2.2.2
 torchvision==0.17.2
-# YOLOv5 hubconf imports parts of Ultralytics
 ultralytics==8.1.0
-# Headless OpenCV for Cloud
-opencv-python-headless==4.8.1.78
-# Image + Data deps
-Pillow>=10.0
-pandas>=2.0
-# numpy pinned for Torch/Ultralytics compatibility on 3.11
+Pillow==10.3.0
+pandas==2.2.2
 numpy==1.26.4
-requests>=2.31
+requests==2.31.0
+opencv-python-headless==4.8.1.78
